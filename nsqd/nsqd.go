@@ -45,42 +45,43 @@ type Client interface {
 type NSQD struct {
 	//	// 放在头部保证在 32 位机器上对其操作
 	// 64bit atomic vars need to be first for proper alignment on 32bit platforms
-	clientIDSequence int64  //递增的客户端ID，每个客户端连接均从这里取一个递增后的ID作为唯一标识
+	clientIDSequence int64 //递增的客户端ID，每个客户端连接均从这里取一个递增后的ID作为唯一标识
 
-	sync.RWMutex      // 仅在操作 topic 的时候才会使用这个锁,使用读写锁
+	sync.RWMutex // 仅在操作 topic 的时候才会使用这个锁,使用读写锁
 
-	opts atomic.Value  // 参数选项，真实类型是apps/nsqd/option.go:Options结构体
+	opts atomic.Value // 参数选项，真实类型是apps/nsqd/option.go:Options结构体
 
-	dl        *dirlock.DirLock   // 自己实现的文件夹锁
-	isLoading int32				// 标识当前正在从文件中加载元数据
-	errValue  atomic.Value    // 错误标识，使用原子 value
-	startTime time.Time  //程序开始时间
+	dl        *dirlock.DirLock // 自己实现的文件夹锁
+	isLoading int32            // 标识当前正在从文件中加载元数据
+	errValue  atomic.Value     // 错误标识，使用原子 value
+	startTime time.Time        //程序开始时间
 
-	topicMap map[string]*Topic  // 保存当前所有的topic
+	topicMap map[string]*Topic // 保存当前所有的topic
 
 	clientLock sync.RWMutex     // 操作 Clients 时的读写锁
-	clients    map[int64]Client   //Client是接口  管理所有Client
+	clients    map[int64]Client //Client是接口  管理所有Client
 
-	lookupPeers atomic.Value  //用来记录所有 lookupPeer（和 lookupd 的连接）
+	lookupPeers atomic.Value //用来记录所有 lookupPeer（和 lookupd 的连接）
 
 	tcpServer     *tcpServer   //// 用来管理所有连接
-	tcpListener   net.Listener  // 监听 TCP 连接
-	httpListener  net.Listener  // 监听 HTTP 连接
-	httpsListener net.Listener  // 监听 HTTPS 连接
+	tcpListener   net.Listener // 监听 TCP 连接
+	httpListener  net.Listener // 监听 HTTP 连接
+	httpsListener net.Listener // 监听 HTTPS 连接
 	tlsConfig     *tls.Config  // 安全协议配置信息
 
-	poolSize int   // // 用来运行 queueScanWorker 的协程数的多少
+	poolSize int // // 用来运行 queueScanWorker 的协程数的多少
 
-	notifyChan           chan interface{}   // 通知 lookupd 的管道
-	optsNotificationChan chan struct{}    // 用来通知 lookupd IP 地址改变通知
-	exitChan             chan int         // 用来通知各个 channel nsqd 退出从而停止循环监听
+	notifyChan           chan interface{}      // 通知 lookupd 的管道
+	optsNotificationChan chan struct{}         // 用来通知 lookupd IP 地址改变通知
+	exitChan             chan int              // 用来通知各个 channel nsqd 退出从而停止循环监听
 	waitGroup            util.WaitGroupWrapper // 简单封装了个waitGroup 用来在程序退出之前等待 goroutine 退出
 
-	ci *clusterinfo.ClusterInfo   // 专门用来和 lookupd 通信
+	ci *clusterinfo.ClusterInfo // 专门用来和 lookupd 通信
 }
+
 /**
 实例化一个 nsqd 对象
- */
+*/
 func New(opts *Options) (*NSQD, error) {
 	var err error
 	//检测 datapath 是否设置
@@ -98,12 +99,12 @@ func New(opts *Options) (*NSQD, error) {
 	//实例化主类 也是结构体指针
 	n := &NSQD{
 		startTime:            time.Now(),
-		topicMap:             make(map[string]*Topic),  // 管理 topic 的 map
-		clients:              make(map[int64]Client),   // 管理所有客户端,Client是接口，这里也是指针 现在用的是ClientV2
-		exitChan:             make(chan int),             // 退出通知管道
-		notifyChan:           make(chan interface{}),     // 通知 lookupd 的管道
+		topicMap:             make(map[string]*Topic), // 管理 topic 的 map
+		clients:              make(map[int64]Client),  // 管理所有客户端,Client是接口，这里也是指针 现在用的是ClientV2
+		exitChan:             make(chan int),          // 退出通知管道
+		notifyChan:           make(chan interface{}),  // 通知 lookupd 的管道
 		optsNotificationChan: make(chan struct{}, 1),
-		dl:                   dirlock.New(dataPath),//初始化目录锁   目录锁，保证只有一个 nsqd 使用该目录
+		dl:                   dirlock.New(dataPath), //初始化目录锁   目录锁，保证只有一个 nsqd 使用该目录
 	}
 	//实例化 http_client 结构体，简单包了一层http 	 创建一个 HTTP 客户端，用来从 lookupd 中获取 topic 数据
 	httpcli := http_api.NewClient(nil, opts.HTTPClientConnectTimeout, opts.HTTPClientRequestTimeout)
@@ -129,7 +130,6 @@ func New(opts *Options) (*NSQD, error) {
 	if opts.ID < 0 || opts.ID >= 1024 {
 		return nil, errors.New("--node-id must be [0,1024)")
 	}
-
 
 	// 先把统计前缀拼出来存到 opts.StatsdPrefix
 	if opts.StatsdPrefix != "" {
@@ -169,7 +169,7 @@ func New(opts *Options) (*NSQD, error) {
 	}
 
 	n.logf(LOG_INFO, version.String("nsqd"))
-	n.logf(LOG_INFO, "ID: %d", opts.ID)   // ID 是编码生成的 [0,1023] 之间
+	n.logf(LOG_INFO, "ID: %d", opts.ID) // ID 是编码生成的 [0,1023] 之间
 
 	//初始化tcp server
 	n.tcpServer = &tcpServer{}
@@ -265,7 +265,6 @@ func (n *NSQD) RemoveClient(clientID int64) {
 	n.clientLock.Unlock()
 }
 
-
 /*
    程序启动时调用本方法，执行下面的动作：
        - 启动TCP/HTTP/HTTPS服务
@@ -318,9 +317,9 @@ func (n *NSQD) Main() error {
 	//queueScanLoop
 	//n 个 queueScanWorker
 	//开了个协程  负责处理延迟消息
-	n.waitGroup.Wrap(n.queueScanLoop)    // 处理消息的优先队列
+	n.waitGroup.Wrap(n.queueScanLoop) // 处理消息的优先队列
 	//开了个协程  节点信息管理
-	n.waitGroup.Wrap(n.lookupLoop)      // 如果 nsqd 发生变化，同步至 nsqloopdup，函数定义在 lookup 中
+	n.waitGroup.Wrap(n.lookupLoop) // 如果 nsqd 发生变化，同步至 nsqloopdup，函数定义在 lookup 中
 
 	if n.getOpts().StatsdAddress != "" {
 		//统计信息
@@ -422,6 +421,7 @@ func (n *NSQD) LoadMetadata() error {
 	}
 	return nil
 }
+
 //PersistMetadata将当前的topic和channel信息写入*nsqd.%d.dat*文件中,
 //主要步骤是忽略#ephemeral结尾的topic和channel后将topic和channel列表json序列化后写回文件中
 func (n *NSQD) PersistMetadata() error {
@@ -466,18 +466,18 @@ func (n *NSQD) PersistMetadata() error {
 	}
 
 	tmpFileName := fmt.Sprintf("%s.%d.tmp", fileName, rand.Int())
-/**
-  写入文件时先创建扩展名为tmp的临时文件，
-写入内容后并保存后再调用atomicRename函数将tmp文件重命名为*nsqd.%d.dat*。
-其中atomicRename函数在windows和其他操作系统下实现方式不同，
-分别位于nsqd/rename_windows.go 和rename.go中。
-在Linux下直接调用了os.Rename函数，而Windows下则使用Win32 API实现了文件的重命名。
-这是因为go的早期版本中Windows下调用os.Rename函数时如果重命名后的文件已经存在则会失败。
-这个bug在os: make Rename atomic on Windows中提到， 并且已经在os: windows Rename should overwrite destination file.提交中被修复，
-因此，Golang1.5不存在这一bug
+	/**
+	    写入文件时先创建扩展名为tmp的临时文件，
+	  写入内容后并保存后再调用atomicRename函数将tmp文件重命名为*nsqd.%d.dat*。
+	  其中atomicRename函数在windows和其他操作系统下实现方式不同，
+	  分别位于nsqd/rename_windows.go 和rename.go中。
+	  在Linux下直接调用了os.Rename函数，而Windows下则使用Win32 API实现了文件的重命名。
+	  这是因为go的早期版本中Windows下调用os.Rename函数时如果重命名后的文件已经存在则会失败。
+	  这个bug在os: make Rename atomic on Windows中提到， 并且已经在os: windows Rename should overwrite destination file.提交中被修复，
+	  因此，Golang1.5不存在这一bug
 
 
-*/
+	*/
 	err = writeSyncFile(tmpFileName, data)
 	if err != nil {
 		return err
@@ -534,7 +534,7 @@ func (n *NSQD) Exit() {
 /**
 如果 nsqd 中没有这个 topic 会进行创建,如果是从 nsqd.dat 加载文件时创建 topic 直接返回不执行 Start(),
 如果是新的 topic,会尝试从 lookupd 中获取对应的所有 channels,保证 channel 列表的正确性,最后执行 topic.Start()启动 topic.
- */
+*/
 func (n *NSQD) GetTopic(topicName string) *Topic {
 	// most likely, we already have this topic, so try read lock first.
 	//当需要获取一个 topic 的时候，先用读锁去读(此时如果有写锁将被阻塞)，若存在则直接返回，若不存在则使用写锁新建一个；
@@ -543,7 +543,7 @@ func (n *NSQD) GetTopic(topicName string) *Topic {
 	n.RLock()
 	t, ok := n.topicMap[topicName]
 	n.RUnlock()
-	if ok {  //有的话直接返回
+	if ok { //有的话直接返回
 		return t
 	}
 	//到这里还是没有,看来得加个锁 创建了
@@ -573,7 +573,6 @@ func (n *NSQD) GetTopic(topicName string) *Topic {
 	if atomic.LoadInt32(&n.isLoading) == 1 {
 		return t
 	}
-
 
 	// 从下面开始就不再使用 NSQD 的全局锁转而使用 topic 的细粒度锁
 	// 如果使用了 lookupd 就需要阻塞获取该 topic 的所有 channel，并立即进行创建
@@ -709,7 +708,7 @@ func (n *NSQD) resizePool(num int, workCh chan *Channel, responseCh chan bool, c
 			break
 		} else if idealPoolSize < n.poolSize { // 关闭 queueScanWorker 协程直到剩余数量等于 idealPoolSize
 			// contract
-			closeCh <- 1   // 一次只关闭一个
+			closeCh <- 1 // 一次只关闭一个
 			n.poolSize--
 		} else {
 			// expand
@@ -766,7 +765,7 @@ func (n *NSQD) queueScanWorker(workCh chan *Channel, responseCh chan bool, close
 //
 // If QueueScanDirtyPercent (default: 25%) of the selected channels were dirty,
 // the loop continues without sleep.
-//管道扫进程，他的逻辑是将tpic，channel中的数据读入到worker channel, 并每隔一定的时间更新worker数量，扫描chanel中的数据。
+//管道扫进程，他的逻辑是将topic，channel中的数据读入到worker channel, 并每隔一定的时间更新worker数量，扫描chanel中的数据。
 
 /**
 以上函数的 loop 部分就是主要的 channel 扫描部分,在这里先使用 util.UniqRands 确定每次扫描的 channel.
@@ -792,7 +791,7 @@ flight 队列中，保存的是推送到消费端的消息，优先队列中，�
 processDeferdQueue 处理延迟队列的消息
 deferd 队列中，保存的是延迟推送的消息，优先队列中，按照time排序，距离消息要发送的时间越短，越靠前
 定时从deferd 队列中获取最近需要发送的消息，如果消息已达到发送时间，则pop 消息，将消息发送
- */
+*/
 func (n *NSQD) queueScanLoop() {
 	//实例化Channel的 channel   20个缓冲区
 	workCh := make(chan *Channel, n.getOpts().QueueScanSelectionCount)
@@ -833,7 +832,7 @@ func (n *NSQD) queueScanLoop() {
 	loop:
 		// 随机从一个位置开始循环 channels
 		for _, i := range util.UniqRands(num, len(channels)) {
-			workCh <- channels[i]    // 把 channel 交给 work pool 处理
+			workCh <- channels[i] // 把 channel 交给 work pool 处理
 		}
 		//每隔刷新间隔判断worker数量是否发生变化。
 		// 判断 dirty 的个数
